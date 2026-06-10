@@ -42,18 +42,29 @@ export async function initDatabase(): Promise<void> {
   if (backend) return;
 
   try {
-    betterSqlite3Constructor = _require("better-sqlite3");
+    const ctor = _require("better-sqlite3");
+    // `require` can succeed while the compiled native binding is missing (build
+    // script blocked, or no prebuilt for the running Node version) — the failure
+    // only surfaces at construction. Smoke-test an in-memory open so we fall back
+    // to the WASM backend instead of throwing later on the first real query.
+    new ctor(":memory:").close();
+    betterSqlite3Constructor = ctor;
     backend = "better-sqlite3";
   } catch {
-    const sqlJs = await import("sql.js-fts5");
-    const initSqlJs = sqlJs.default;
-    // Load WASM binary manually — older sql.js-fts5 uses fetch() with a bare
-    // path which fails in newer Node.js versions that require a proper URL.
-    const wasmPath = _require.resolve("sql.js-fts5/dist/sql-wasm.wasm");
-    const wasmBinary = readFileSync(wasmPath);
-    sqlJsApi = await initSqlJs({ wasmBinary });
-    backend = "sql.js";
+    await initSqlJsBackend();
   }
+}
+
+/** Load the pure-WASM sql.js backend (no native compilation required). */
+async function initSqlJsBackend(): Promise<void> {
+  const sqlJs = await import("sql.js-fts5");
+  const initSqlJs = sqlJs.default;
+  // Load WASM binary manually — older sql.js-fts5 uses fetch() with a bare
+  // path which fails in newer Node.js versions that require a proper URL.
+  const wasmPath = _require.resolve("sql.js-fts5/dist/sql-wasm.wasm");
+  const wasmBinary = readFileSync(wasmPath);
+  sqlJsApi = await initSqlJs({ wasmBinary });
+  backend = "sql.js";
 }
 
 /**
